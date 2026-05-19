@@ -96,8 +96,9 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
-            overflow: hidden;
+            justify-content: flex-start; /* Changed from center to prevent top cut-off */
+            overflow-x: hidden; /* Hide horizontal scroll */
+            overflow-y: auto;   /* Re-enable vertical scroll */
             background: linear-gradient(-45deg, var(--bg-grad-1), var(--bg-grad-2), var(--bg-grad-3));
             background-size: 400% 400%;
             animation: gradientBG 15s ease infinite;
@@ -118,6 +119,7 @@
             flex-direction: column;
             gap: 2rem;
             z-index: 2;
+            margin: auto 0; /* Safely centers the app dynamically */
         }
 
         /* Glassmorphism Panel */
@@ -363,8 +365,69 @@
 
         canvas#wpm-chart {
             width: 100%;
-            height: 150px;
+            height: 200px;
             display: block;
+        }
+
+        /* SESSION HISTORY TABLE */
+        .history-container {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--glass-border);
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            width: 100%;
+            overflow-x: auto;
+        }
+
+        .history-container .label {
+            color: var(--text-untyped);
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 1rem;
+        }
+
+        .history-table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            min-width: 600px;
+        }
+
+        .history-table th {
+            color: var(--text-untyped);
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            padding-bottom: 0.8rem;
+            border-bottom: 1px solid var(--glass-border);
+            font-weight: 700;
+        }
+
+        .history-table td {
+            padding: 0.8rem 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            font-size: 0.95rem;
+            color: var(--text-correct);
+        }
+
+        .history-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .history-table .wpm-col {
+            color: var(--main);
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+
+        .history-table .err-col {
+            color: var(--text-incorrect);
+        }
+
+        .history-table .time-col {
+            color: var(--text-untyped);
+            font-size: 0.85rem;
         }
 
         .action-row { display: flex; justify-content: center; gap: 1rem; margin-top: 1rem; }
@@ -535,8 +598,29 @@
 
                 <!-- WPM Chart -->
                 <div class="chart-container">
-                    <div class="label">wpm over time</div>
+                    <div class="label">// wpm over time</div>
                     <canvas id="wpm-chart"></canvas>
+                </div>
+
+                <!-- Session History Table -->
+                <div class="history-container">
+                    <div class="label">// session history</div>
+                    <table class="history-table">
+                        <thead>
+                            <tr>
+                                <th>wpm</th>
+                                <th>raw</th>
+                                <th>acc</th>
+                                <th>cons</th>
+                                <th>err</th>
+                                <th>mode</th>
+                                <th>time</th>
+                            </tr>
+                        </thead>
+                        <tbody id="history-tbody">
+                            <!-- Injected via JS -->
+                        </tbody>
+                    </table>
                 </div>
 
                 <div class="action-row">
@@ -665,6 +749,15 @@
                     this.state.useNums = !this.state.useNums;
                     e.target.classList.toggle('active', this.state.useNums);
                     this.resetTest();
+                });
+
+                // Redraw chart if window is resized to prevent visual glitches
+                window.addEventListener('resize', () => {
+                    if (this.state.isFinished) {
+                        this.drawWpmChart();
+                    } else {
+                        this.updateCaret();
+                    }
                 });
             }
 
@@ -962,19 +1055,42 @@
                     cons = Math.max(0, Math.min(100, Math.round(100 - cv)));
                 }
 
-                // Local Storage Personal Best Tracking
+                // --- SESSION HISTORY & LOCAL STORAGE LOGIC ---
+                const modeLabel = `${this.state.amount}${this.state.mode === 'time' ? 's timed' : ' words'}`;
                 const configKey = `${this.state.mode}_${this.state.amount}_punct${this.state.usePunct}_nums${this.state.useNums}`;
-                let storageData = JSON.parse(localStorage.getItem('yashtypes_history') || '{}');
-                let prevBest = storageData[configKey] || 0;
                 
+                // Fetch full history from LocalStorage
+                let historyData = JSON.parse(localStorage.getItem('yashtypes_full_history') || '[]');
+                
+                // Determine if it's a PB for this specific setting configuration
+                const prevBest = historyData.filter(h => h.configKey === configKey).reduce((max, h) => Math.max(max, h.wpm), 0);
                 let isPB = false;
-                if (netWpm > prevBest) {
+                if (netWpm > prevBest && netWpm > 0) {
                     isPB = true;
-                    storageData[configKey] = netWpm;
-                    localStorage.setItem('yashtypes_history', JSON.stringify(storageData));
                 }
 
-                // Bind to Results UI
+                const now = new Date();
+                const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                // Construct current attempt object
+                const currentAttempt = {
+                    wpm: netWpm,
+                    raw: rawWpm,
+                    acc: acc,
+                    cons: cons,
+                    err: totalErrors,
+                    modeLabel: modeLabel,
+                    timeString: timeString,
+                    configKey: configKey,
+                    timestamp: Date.now()
+                };
+
+                // Add to start of history and cap at 50 items to prevent storage bloat
+                historyData.unshift(currentAttempt);
+                if (historyData.length > 50) historyData.pop();
+                localStorage.setItem('yashtypes_full_history', JSON.stringify(historyData));
+
+                // --- BIND TO UI ---
                 document.getElementById('res-wpm').innerText = netWpm;
                 document.getElementById('res-acc').innerText = `${acc}%`;
                 document.getElementById('res-raw').innerText = rawWpm;
@@ -983,25 +1099,44 @@
                 
                 const secs = Math.round((this.stats.endTime - this.stats.startTime) / 1000);
                 document.getElementById('res-time').innerText = `${secs}s`;
-                document.getElementById('res-mode-sub').innerText = `${this.state.amount}${this.state.mode === 'time' ? 's timed' : ' words'}`;
-                
+                document.getElementById('res-mode-sub').innerText = modeLabel;
                 document.getElementById('res-acc-sub').innerText = `${this.stats.correct}/${totalAttempted} chars`;
                 
-                // Character Breakdown Row
                 document.getElementById('res-correct').innerText = this.stats.correct;
                 document.getElementById('res-incorrect').innerText = this.stats.incorrect;
                 document.getElementById('res-extra').innerText = this.stats.extra;
                 document.getElementById('res-missed').innerText = this.stats.missed;
                 document.getElementById('res-keys').innerText = this.stats.totalKeys;
 
-                // Handle PB UI
-                if (isPB && netWpm > 0) {
+                // Handle PB Badge
+                if (isPB) {
                     document.getElementById('pb-badge').style.display = 'inline-block';
                     document.getElementById('pb-val').innerText = netWpm;
                     document.getElementById('res-wpm-sub').innerText = '🏆 new personal best!';
                 } else {
+                    document.getElementById('pb-badge').style.display = 'none';
                     document.getElementById('res-wpm-sub').innerText = prevBest > 0 ? `pb: ${prevBest} wpm` : 'test complete';
                 }
+
+                // Render History Table
+                const tbody = document.getElementById('history-tbody');
+                tbody.innerHTML = '';
+                historyData.forEach((row, index) => {
+                    const tr = document.createElement('tr');
+                    // Add subtle highlight to the very first row (the one just completed)
+                    if(index === 0) tr.style.background = 'rgba(255,255,255,0.03)';
+                    
+                    tr.innerHTML = `
+                        <td class="wpm-col">${row.wpm}</td>
+                        <td>${row.raw}</td>
+                        <td>${row.acc}%</td>
+                        <td>${row.cons}%</td>
+                        <td class="err-col">${row.err}</td>
+                        <td>${row.modeLabel}</td>
+                        <td class="time-col">${row.timeString}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
 
                 // Draw the Canvas Graph
                 setTimeout(() => this.drawWpmChart(), 100);
@@ -1014,53 +1149,102 @@
                 // Fetch dynamic theme colors from CSS variables
                 const style = getComputedStyle(document.body);
                 const mainColor = style.getPropertyValue('--main').trim() || '#00f0ff';
+                const textColor = style.getPropertyValue('--text-untyped').trim() || '#5a668a';
                 
-                canvas.width = canvas.parentElement.clientWidth;
-                canvas.height = 150;
-                const W = canvas.width;
-                const H = canvas.height;
+                // High-DPI handling for perfectly crisp text
+                const dpr = window.devicePixelRatio || 1;
+                const rect = canvas.parentElement.getBoundingClientRect();
+                
+                canvas.width = rect.width * dpr;
+                canvas.height = 200 * dpr; // Height increased to 200px to fit labels
+                ctx.scale(dpr, dpr);
+                
+                const W = rect.width;
+                const H = 200;
                 
                 ctx.clearRect(0, 0, W, H);
                 
                 if (this.wpmHistory.length === 0) return;
                 
                 const maxWpm = Math.max(...this.wpmHistory, 10);
-                const padTop = 10;
-                const padBot = 10;
-                const graphH = H - padTop - padBot;
+                
+                // Padding to create room for the axes labels
+                const padLeft = 40;
+                const padBottom = 25;
+                const padTop = 15;
+                const padRight = 15;
+                
+                const graphW = W - padLeft - padRight;
+                const graphH = H - padTop - padBottom;
 
-                // Draw Line Path
+                const getX = (index) => padLeft + (index / Math.max(1, this.wpmHistory.length - 1)) * graphW;
+                const getY = (val) => padTop + graphH - ((val / maxWpm) * graphH);
+
+                // --- DRAW GRID AND AXES ---
+                ctx.font = '12px "JetBrains Mono", monospace';
+                ctx.fillStyle = textColor;
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+                ctx.lineWidth = 1;
+
+                // Y-Axis (WPM Speed)
+                ctx.textAlign = 'right';
+                ctx.textBaseline = 'middle';
+                const ySteps = 4;
+                for (let i = 0; i <= ySteps; i++) {
+                    const wpmVal = Math.round(maxWpm * (i / ySteps));
+                    const y = getY(wpmVal);
+                    
+                    // Draw horizontal grid line
+                    ctx.beginPath();
+                    ctx.moveTo(padLeft, y);
+                    ctx.lineTo(W - padRight, y);
+                    ctx.stroke();
+                    
+                    // Draw WPM Label
+                    ctx.fillText(wpmVal, padLeft - 10, y);
+                }
+
+                // X-Axis (Time in Seconds)
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'top';
+                const xSteps = Math.min(this.wpmHistory.length - 1, 5); // Display up to 5 time labels
+                for (let i = 0; i <= xSteps; i++) {
+                    const dataIndex = Math.floor(i * (this.wpmHistory.length - 1) / xSteps);
+                    const x = getX(dataIndex);
+                    // The time is the index + 1 (since we sample every 1s)
+                    ctx.fillText(`${dataIndex + 1}s`, x, H - padBottom + 8);
+                }
+
+                // --- DRAW LINE PATH ---
                 ctx.beginPath();
                 ctx.strokeStyle = mainColor;
                 ctx.lineWidth = 3;
                 ctx.lineJoin = 'round';
                 
                 this.wpmHistory.forEach((val, i) => {
-                    const x = (i / Math.max(1, this.wpmHistory.length - 1)) * W;
-                    const y = padTop + graphH - ((val / maxWpm) * graphH);
-                    
-                    if (i === 0) ctx.moveTo(x, y);
-                    else ctx.lineTo(x, y);
+                    if (i === 0) ctx.moveTo(getX(i), getY(val));
+                    else ctx.lineTo(getX(i), getY(val));
                 });
-                
                 ctx.stroke();
                 
-                // Draw Fill under the line
-                ctx.lineTo(W, H);
-                ctx.lineTo(0, H);
+                // --- DRAW GRADIENT FILL ---
+                ctx.lineTo(getX(this.wpmHistory.length - 1), getY(0));
+                ctx.lineTo(getX(0), getY(0));
                 ctx.closePath();
-                ctx.globalAlpha = 0.15; // Set transparency for the glowing fill
-                ctx.fillStyle = mainColor;
-                ctx.fill();
-                ctx.globalAlpha = 1.0; // Reset alpha
                 
-                // Draw Points
+                const gradient = ctx.createLinearGradient(0, padTop, 0, padTop + graphH);
+                gradient.addColorStop(0, mainColor);
+                gradient.addColorStop(1, 'transparent');
+                
+                ctx.globalAlpha = 0.2; 
+                ctx.fillStyle = gradient;
+                ctx.fill();
+                ctx.globalAlpha = 1.0; 
+                
+                // --- DRAW DATA POINTS ---
                 this.wpmHistory.forEach((val, i) => {
-                    const x = (i / Math.max(1, this.wpmHistory.length - 1)) * W;
-                    const y = padTop + graphH - ((val / maxWpm) * graphH);
-                    
                     ctx.beginPath();
-                    ctx.arc(x, y, 4, 0, Math.PI * 2);
+                    ctx.arc(getX(i), getY(val), 4, 0, Math.PI * 2);
                     ctx.fillStyle = mainColor;
                     ctx.fill();
                 });
