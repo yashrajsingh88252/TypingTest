@@ -1119,12 +1119,26 @@
                 }
 
                 // Render History Table
+                this.renderHistory();
+
+                // Draw the Canvas Graph
+                setTimeout(() => this.drawWpmChart(), 100);
+            }
+
+            renderHistory() {
+                let historyData = JSON.parse(localStorage.getItem('yashtypes_full_history') || '[]');
                 const tbody = document.getElementById('history-tbody');
                 tbody.innerHTML = '';
+                
+                if (historyData.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-untyped); padding: 1rem;">no history available.</td></tr>';
+                    return;
+                }
+
                 historyData.forEach((row, index) => {
                     const tr = document.createElement('tr');
                     // Add subtle highlight to the very first row (the one just completed)
-                    if(index === 0) tr.style.background = 'rgba(255,255,255,0.03)';
+                    if(index === 0 && this.state.isFinished) tr.style.background = 'rgba(255,255,255,0.03)';
                     
                     tr.innerHTML = `
                         <td class="wpm-col">${row.wpm}</td>
@@ -1134,12 +1148,24 @@
                         <td class="err-col">${row.err}</td>
                         <td>${row.modeLabel}</td>
                         <td class="time-col">${row.timeString}</td>
+                        <td><button class="btn" style="padding: 0.2rem 0.5rem; font-size: 1.2rem; color: var(--text-untyped);" onmouseover="this.style.color='var(--text-incorrect)'" onmouseout="this.style.color='var(--text-untyped)'" onclick="engine.deleteHistoryItem(${index})" title="Delete entry">×</button></td>
                     `;
                     tbody.appendChild(tr);
                 });
+            }
 
-                // Draw the Canvas Graph
-                setTimeout(() => this.drawWpmChart(), 100);
+            clearHistory() {
+                if(confirm("Are you sure you want to clear all session history?")) {
+                    localStorage.removeItem('yashtypes_full_history');
+                    this.renderHistory();
+                }
+            }
+
+            deleteHistoryItem(index) {
+                let historyData = JSON.parse(localStorage.getItem('yashtypes_full_history') || '[]');
+                historyData.splice(index, 1);
+                localStorage.setItem('yashtypes_full_history', JSON.stringify(historyData));
+                this.renderHistory();
             }
 
             drawWpmChart() {
